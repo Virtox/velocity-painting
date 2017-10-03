@@ -82,7 +82,7 @@ GetOptions ("projection_mode=s"=>\$projectionMode,
 			"projected_image_width=i" =>\$projectedImageWidth);
 
 
-print ";Modified by Velocity Paint on " . localtime();
+print ";Modified by Velocity Paint $VERSION on " . localtime();
 print "\n\n;Used parameters:\n";
 print ";projection_mode => $projectionMode\n";
 print ";z_offset => $zOffset\n";
