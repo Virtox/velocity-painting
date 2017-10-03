@@ -1,3 +1,26 @@
+# This version is still work in progress
+
+Changes:
+The original script was not working for my printers and the detail I had in mind.
+On one printer, during the faster moves, the extruder tried to keep up and started to miss steps, on another the extruder kept up and the result was poor/invisible. Increasing speeds reduced the quality too much.
+So, I think an improvement for the velocity painting is to keep constant input pressure on the nozzle instead of relying on the fact the extruder can't keep up or just misses steps.
+- Modified the extrusion amount to counteract the speed increase.
+For example if the modulated speed doubles, the extrusion speed halves, resulting in the extruder motor running at the same speed during the whole print. New extrusion value stored in $newE etc.
+
+- Changed spherical projection routine to Latitude Longitude form.
+- Don't process lines when retracting
+
+- Added a skip to z, so it will not process layers until this z.
+
+- Added Getopt::Long for cleaner parameter parsing.
+
+- Added a G92 parse to reset newE
+
+- Print the parameters and gcode at the top of the Gcode file.
+
+Still need to debug a little and clean up some more, but happy with the new results so far!
+I have only use spherical projection so far, hope I did not break anything else.
+
 # Velocity Painting
 
 I'd love this to evolve into something cool. All I ask is that you use the term _Velocity Painting_, tag things with _#VelocityPainting_, and ack that I, Mark Wheadon, started this bizarre journey with the idea, the name, and some functional though fragile code ;-) See the licence at the bottom of this document.
