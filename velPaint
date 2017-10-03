@@ -1,8 +1,12 @@
-#!/opt/local/bin/perl -w
+#!/usr/bin/perl
 
 # Velocity Painting by [Mark Wheadon](https://github.com/MarkWheadon) is licensed under a [Creative Commons Attribution 4.0
 # International License](http://creativecommons.org/licenses/by/4.0/).
 # Based on a work at https://github.com/MarkWheadon/velocity-painting.
+# Modified by Stijn van der Linden / Virtox
+
+#./velPaint --projection_mode spherical --print_centre_x 0 --print_centre_y 0 --x_offset 0 --y_offset 0 --z_offset 44.3 --max_vector_length 0.2 --skip_z 0.2 --target_speed 6000 --low_speed 300 --high_speed 3000 --image input_image.bmp --gcode input.gcode > output.gcode
+
 
 use strict;
 use warnings;
@@ -11,92 +15,124 @@ use 5.10.1;
 our $VERSION = 0.4;
 use Math::Trig;
 use Imager;
+use Getopt::Long;
 
-unless ((@ARGV > 0) &&
-   ((($ARGV[0] =~ /^-project[XYZ]$/ || $ARGV[0] eq '-spherical') && @ARGV >= 10) ||
-   ($ARGV[0] eq '-cylinderZ' && @ARGV >= 9))) {
-	print STDERR <<END;
-Usage:
-  $0 -projectX  printCentreX printCentreY imageWidth imageHeight zOffset targetSpeed lowSpeed highSpeed imageFile [sourceGcodeFile] > paintedGcodeFile
-  $0 -projectY  printCentreX printCentreY imageWidth imageHeight zOffset targetSpeed lowSpeed highSpeed imageFile [sourceGcodeFile] > paintedGcodeFile
-  $0 -projectZ  printCentreX printCentreY imageWidth imageHeight zOffset targetSpeed lowSpeed highSpeed imageFile [sourceGcodeFile] > paintedGcodeFile
-  $0 -cylinderZ printCentreX printCentreY            imageHeight zOffset targetSpeed lowSpeed highSpeed imageFile [sourceGcodeFile] > paintedGcodeFile
-  $0 -spherical printCentreX printCentreY xOffset    yOffset     zOffset targetSpeed lowSpeed highSpeed imageFile [sourceGcodeFile] > paintedGcodeFile
+# Todo revised input sanity check:
+# unless ((@ARGV > 0) &&
+#    ((($ARGV[0] =~ /^-project[XYZ]$/ || $ARGV[0] eq '-spherical') && @ARGV >= 10) ||
+#    ($ARGV[0] eq '-cylinderZ' && @ARGV >= 9))) {
+# 	print STDERR <<END;
+# Usage:
+#   $0 -projectX  printCentreX printCentreY imageWidth imageHeight zOffset targetSpeed lowSpeed highSpeed imageFile [sourceGcodeFile] > paintedGcodeFile
+#   $0 -projectY  printCentreX printCentreY imageWidth imageHeight zOffset targetSpeed lowSpeed highSpeed imageFile [sourceGcodeFile] > paintedGcodeFile
+#   $0 -projectZ  printCentreX printCentreY imageWidth imageHeight zOffset targetSpeed lowSpeed highSpeed imageFile [sourceGcodeFile] > paintedGcodeFile
+#   $0 -cylinderZ printCentreX printCentreY            imageHeight zOffset targetSpeed lowSpeed highSpeed imageFile [sourceGcodeFile] > paintedGcodeFile
+#   $0 -spherical printCentreX printCentreY xOffset    yOffset     zOffset targetSpeed lowSpeed highSpeed imageFile [sourceGcodeFile] > paintedGcodeFile
 
-printCentre{X,Y} is the centre of the print in the printer's coordinate space, in mm.
--projectX projects the image onto the X axis as if the X axis were a cinema screen.
--projectY and -projectZ are similar, so use -projectZ to project onto the top/bottom of the model.
--cylinderZ wraps the image around the Z axis: great for vases.
--spherical projects outwards from the origin, offset by {x,y,z}Offset
-When the print in centred on the bed then printCentre{X,Y} is 0,0 for most (all?) detas. 125,105 for the Prusa i3 MK2.
-imageWidth and imageHeight and the offsets are all in mm.
-Specifying an imageWith of '-' sets it to the correct width for the specified height.
-Specifying an imageHeight of '-' sets it to the correct height for the specified width.
-targetSpeed is the speed of the vectors you wish to manipulate
-(so slice the model with all speeds set to this value).
-lowSpeed is the required speed for the slow parts of the print
-highSpeed is the required speed for the quick parts of the print
-imageFile is the image to be mapped onto the print.
+# printCentre{X,Y} is the centre of the print in the printer's coordinate space, in mm.
+# -projectX projects the image onto the X axis as if the X axis were a cinema screen.
+# -projectY and -projectZ are similar, so use -projectZ to project onto the top/bottom of the model.
+# -cylinderZ wraps the image around the Z axis: great for vases.
+# -spherical projects outwards from the origin, offset by {x,y,z}Offset
+# When the print in centred on the bed then printCentre{X,Y} is 0,0 for most (all?) detas. 125,105 for the Prusa i3 MK2.
+# imageWidth and imageHeight and the offsets are all in mm.
+# Specifying an imageWith of '-' sets it to the correct width for the specified height.
+# Specifying an imageHeight of '-' sets it to the correct height for the specified width.
+# targetSpeed is the speed of the vectors you wish to manipulate
+# (so slice the model with all speeds set to this value).
+# lowSpeed is the required speed for the modulatedSpeed parts of the print
+# highSpeed is the required speed for the quick parts of the print
+# imageFile is the image to be mapped onto the print.
 
-All speeds above are in mm/min.
-END
-	exit 1;
-}
+# All speeds above are in mm/min.
+# END
+# 	exit 1;
+# }
 
-my $projectionMode = shift @ARGV;
-my $projectedImageWidth;
+my $projectionMode ='';
+my $maxVecLength=1; # Longest vector in mm. Splits longer vectors. Very small -> long processing times.
+my $projectedImageWidth=1;
+my $projectedImageHeight=1;
+my $printCentreX = 0;
+my $printCentreY = 0;
+my $skipZ=0;
+my $xOffset=0;
+my $yOffset=0;
+my $zOffset=0;
+my $targetSpeed=0;
+my $lowSpeed=0;
+my $highSpeed=0;
+my $imageFile='';
+my $sourceGcodeFile='';
 
-my $printCentreX = shift @ARGV;
-my $printCentreY = shift @ARGV;
+GetOptions ("projection_mode=s"=>\$projectionMode,
+			"z_offset=s" =>\$zOffset,
+			"max_vector_length=s" => \$maxVecLength,
+			"skip_z=s" =>\$skipZ,
+			"target_speed=i" =>\$targetSpeed,
+			"low_speed=i" =>\$lowSpeed,
+			"high_speed=i" =>\$highSpeed,
+			"print_centre_x=s" =>\$printCentreX,
+			"print_centre_y=s" =>\$printCentreY,
+			"image=s" =>\$imageFile,
+			"gcode=s" =>\$sourceGcodeFile,
+			"x_offset=s" =>\$xOffset,
+			"y_offset=s" =>\$yOffset,
+			"projected_image_height=i" =>\$projectedImageHeight,
+			"projected_image_width=i" =>\$projectedImageWidth);
 
-if ($projectionMode =~ /^-project[XYZ]$/) {
-	$projectedImageWidth = shift @ARGV;
-}
 
-my $projectedImageHeight;
-my $xOffset;
-my $yOffset;
-if ($projectionMode eq '-spherical') {
-	$xOffset = shift @ARGV;
-	$yOffset = shift @ARGV;
-} else {
-	$projectedImageHeight = shift @ARGV;
-}
-my $zOffset = shift @ARGV;
-
-my $targetSpeed = shift @ARGV;
-my $lowSpeed = shift @ARGV;
-my $highSpeed = shift @ARGV;
-my $imageFile = shift @ARGV;
+print ";Modified by Velocity Paint on " . localtime();
+print "\n\n;Used parameters:\n";
+print ";projection_mode => $projectionMode\n";
+print ";z_offset => $zOffset\n";
+print ";max_vector_length => $maxVecLength\n";
+print ";skip_z => $skipZ\n";
+print ";target_speed => $targetSpeed\n";
+print ";low_speed => $lowSpeed\n";
+print ";high_speed => $highSpeed\n";
+print ";print_centre_x => $printCentreX\n";
+print ";print_centre_y => $printCentreY\n";
+print ";image => $imageFile\n";
+print ";gcode => $sourceGcodeFile\n";
+print ";x_offset => $xOffset\n";
+print ";y_offset => $yOffset\n";
+print ";projected_image_height => $projectedImageHeight\n";
+print ";projected_image_width => $projectedImageWidth\n";
+print ";\n;\n";
 
 my $colourImage = Imager->new(file=>$imageFile) or die Imager->errstr();
-my $image = $colourImage->convert(preset=>'grey');
-
+my $image = $colourImage->convert(preset=>"grey");
 my $imageWidth = $image->getwidth();
 my $imageHeight = $image->getheight();
 my $speedRange = $highSpeed - $lowSpeed;
 
-if (($projectionMode ne '-spherical') && ((($projectionMode eq '-cylinderZ') || $projectedImageWidth eq '-') && $projectedImageHeight eq '-')) {
+
+
+if (($projectionMode ne "spherical") && ((($projectionMode eq "cylinderZ") || $projectedImageWidth eq '-')) && $projectedImageHeight eq '-') {
 	print STDERR <<END;
 $0: you must set either the image width or its height, or both.
 END
 	exit 1;
 }
 
-if (defined $projectedImageWidth && $projectedImageWidth eq '-') {
+if (defined $projectedImageWidth && $projectedImageWidth eq "-") {
 	$projectedImageWidth = $projectedImageHeight * $imageWidth / $imageHeight;
 }
 
-if (defined $projectedImageHeight && $projectedImageHeight eq '-') {
+if (defined $projectedImageHeight && $projectedImageHeight eq "-") {
 	$projectedImageHeight = $projectedImageWidth * $imageHeight / $imageWidth;
 }
 
-my $maxVecLength = .1; # Longest vector in mm. Splits longer vectors. Very small -> long processing times.
 
-my ($oldX, $oldY, $oldZ, $oldE);
+my ($oldX, $oldY, $oldZ, $oldE, $newE);
 my $currentZ;
 my $lastZOutput = -1;
 my $extrudeAbsolute = 1;
+$oldE=0;
+$newE=0;
+
+@ARGV=($sourceGcodeFile);
 
 while (my $line = <>) {
 	my ($x, $y, $z, $e, $f);
@@ -115,49 +151,71 @@ while (my $line = <>) {
 
 	if (defined $z) { $currentZ = $z } else { $z = $currentZ; }
 
+
 	if (defined $x) {
 		if (!defined $oldZ) {
-			outMove($x, $y, $z, $e, 0);
+			$newE=$newE+$e-$oldE;
+			outMove($x, $y, $z, $newE, $lowSpeed, 0);
 		} else {
-			my $xd = $x - $oldX;
-			my $yd = $y - $oldY;
-			my $zd = $z - $oldZ;
-			my $ed = $extrudeAbsolute ? ($e - $oldE) : $e;
-
-			my $length = sqrt($xd * $xd + $yd * $yd + $zd * $zd);
-
-			if ($length <= $maxVecLength) {
-				outMove($x, $y, $z, $e, 0);
+			if ($z<=$skipZ) {
+				$newE=$newE+$e-$oldE;
+				outMoveNormal($x, $y, $z, $newE, $lowSpeed, 0);
 			} else {
-				my $lastSegOut = 0;
-				my $oSlow = surfaceSpeed($oldX, $oldY, $oldZ);
 
-				my $nSegs = int($length / $maxVecLength + 0.5);
+				my $xd = $x - $oldX;
+				my $yd = $y - $oldY;
+				my $zd = $z - $oldZ;
+				my $ed = $extrudeAbsolute ? ($e - $oldE) : $e;
 
-				my $xDelta = $xd / $nSegs;
-				my $yDelta = $yd / $nSegs;
-				my $zDelta = $zd / $nSegs;
-				my $eDelta = $ed / $nSegs;
+				if ($ed < 0) {
+					$newE=$newE+$ed;
+					outMoveNormal($x, $y, $z, $newE, $lowSpeed, 0);
+				} else {
+					my $length = sqrt($xd * $xd + $yd * $yd + $zd * $zd);
+					if ($length <= $maxVecLength) {
+						my $modulatedSpeed = surfaceSpeed($x, $y, $z);
+						my $newEdelta = $ed * $lowSpeed/$modulatedSpeed;
+						$newE=$newE+$newEdelta;
+						outMove($x, $y, $z, $newE, 0);
+					} else {
+						my $lastSegOut = 0;
+						my $oldModulatedSpeed = surfaceSpeed($oldX, $oldY, $oldZ);
 
-				for (my $i = 1; $i <= $nSegs; $i++) {
-					my $nx = $oldX + $xDelta * $i;
-					my $ny = $oldY + $yDelta * $i;
-					my $nz = $oldZ + $zDelta * $i;
+						my $nSegs = int($length / $maxVecLength + 0.5);
 
-					my $slow = surfaceSpeed($nx, $ny, $nz);
+						my $xDelta = $xd / $nSegs;
+						my $yDelta = $yd / $nSegs;
+						my $zDelta = $zd / $nSegs;
+						my $eDelta = $ed / $nSegs;
 
-					if (($slow != $oSlow) && ($i > 1)) {
-						# pattern has changed. Time to output the vector so far
-						outMove($oldX + $xDelta * ($i - 1),
-						  $oldY + $yDelta * ($i - 1),
-						  $oldZ + $zDelta * ($i - 1),
-						  $extrudeAbsolute ? ($oldE + $eDelta * ($i - 1)) : ($eDelta * ($i - $lastSegOut)), 1);
-						$oSlow = $slow;
-						$lastSegOut = $i;
+						for (my $i = 1; $i <= $nSegs; $i++) {
+							my $nx = $oldX + $xDelta * $i;
+							my $ny = $oldY + $yDelta * $i;
+							my $nz = $oldZ + $zDelta * $i;
+
+							my $modulatedSpeed = surfaceSpeed($nx, $ny, $nz);
+
+							if (($modulatedSpeed != $oldModulatedSpeed) && ($i > 1)) {
+								# pattern has changed. Time to output the vector so far
+								my $newEdelta = $eDelta * $lowSpeed/$modulatedSpeed;
+								$newE = $newE + $newEdelta * ($i - $lastSegOut);
+								outMove($oldX + $xDelta * ($i - 1),
+								  $oldY + $yDelta * ($i - 1),
+								  $oldZ + $zDelta * ($i - 1),
+								  $extrudeAbsolute ? ($newE) : ($newEdelta * ($i - $lastSegOut)),
+								  $modulatedSpeed, 1);
+								$oldModulatedSpeed = $modulatedSpeed;
+								$lastSegOut = $i;
+							}
+						}
+						if ($lastSegOut != $nSegs) {
+							my $modulatedSpeed = surfaceSpeed($x, $y, $z);
+							my $newEdelta = $eDelta * $lowSpeed/$modulatedSpeed;
+							$newE = $newE + $newEdelta * ($nSegs - $lastSegOut);
+							outMove($x, $y, $z, $extrudeAbsolute ? $newE : ($newEdelta * ($nSegs - $lastSegOut)), $modulatedSpeed, $lastSegOut != 0);
+						}
 					}
-				}
-				if ($lastSegOut != $nSegs) {
-					outMove($x, $y, $z, $extrudeAbsolute ? $e : ($eDelta * ($nSegs - $lastSegOut)), $lastSegOut != 0);
+
 				}
 			}
 		}
@@ -172,23 +230,30 @@ while (my $line = <>) {
 			$currentZ = $1;
 			$oldZ = $1;
 		} 
-		if ($line =~ /E([\d\.]+)/) {
+		if ($line =~ /G92 E([\d\.]+)/) {
+			$newE=$1;
 			$oldE = $1;
+		} elsif ($line =~ /E([\d\.]+)/) {
+			$newE=$newE-$oldE+$1;
+			$oldE = $1;
+			my $newEcommand = sprintf("E%.5f",$newE); 
+
+			$line =~ s/E([\d\.]+)/$newEcommand/;
 		}
 		print "$line\n";
 	}
 }
 
 sub surfaceSpeed {
-	if ($projectionMode eq '-cylinderZ') {
+	if ($projectionMode eq 'cylinderZ') {
 		return surfaceSpeedCylinderZ(@_);
-	} elsif ($projectionMode eq '-projectX') {
+	} elsif ($projectionMode eq 'projectX') {
 		return surfaceSpeedProjectX(@_);
-	} elsif ($projectionMode eq '-projectY') {
+	} elsif ($projectionMode eq 'projectY') {
 		return surfaceSpeedProjectY(@_);
-	} elsif ($projectionMode eq '-projectZ') {
+	} elsif ($projectionMode eq 'projectZ') {
 		return surfaceSpeedProjectZ(@_);
-	} elsif ($projectionMode eq '-spherical') {
+	} elsif ($projectionMode eq 'spherical') {
 		return surfaceSpeedSpherical(@_);
 	}
 }
@@ -271,19 +336,30 @@ sub surfaceSpeedProjectZ {
 sub surfaceSpeedSpherical() {
 	my ($x, $y, $z) = @_;
 
-	my $theta = atan2($y - $yOffset - $printCentreY, $x - $xOffset - $printCentreX) + pi; # 0 to 2pi
+	my $cx =  $x - $xOffset - $printCentreX;
+	my $cy =  $y - $yOffset - $printCentreY;
+	my $cz =  $z - $zOffset;
+	my $theta = atan2($cy, $cx) + pi; # 0 to 2pi
 	my $xNormalized = $theta / (2 * pi);
 
-	$theta = atan2($z - $zOffset, $x - $xOffset - $printCentreX) + pi; # 0 to 2pi
-	my $zNormalized = $theta / (2 * pi);
+	my $cr=sqrt($cx*$cx+$cy*$cy);
+	my $gamma = atan2($cz,$cr)+pi/2; # 0 to pi
+	my $zNormalized = $gamma / (pi);
+
+	# $theta = atan2($z - $zOffset, $x - $xOffset - $printCentreX) + pi; # 0 to 2pi
+	# my $zNormalized = $theta / (2 * pi);
 
 	my $imageX = $xNormalized * $imageWidth;
 	my $imageY = $imageHeight - $zNormalized * $imageHeight;
 
-	if ($imageX < 0 || $imageX >= $imageWidth || $imageY < 0 || $imageY >= $imageHeight) {
-		return $highSpeed;
-		# return $lowSpeed;
-	}
+	if ($imageX<0) {$imageX=$imageWidth-1+$imageX};
+	if ($imageY<0) {$imageY=0};
+	if ($imageX>=$imageWidth) {$imageX=$imageX-$imageWidth;}
+	if ($imageY>=$imageHeight) {$imageY=$imageHeight-1;}
+	# if ($imageX < 0 || $imageX >= $imageWidth || $imageY < 0 || $imageY >= $imageHeight) {
+	# 	return $highSpeed;
+	# 	# return $lowSpeed;
+	# }
 
 	return $lowSpeed + greyAt($imageX, $imageY) * $speedRange;
 }
@@ -297,13 +373,27 @@ sub greyAt {
 }
 
 sub outMove {
-	my ($x, $y, $z, $e, $extra) = @_;
+	my ($x, $y, $z, $e, $f, $extra) = @_;
+
+	my $zCommand = "";
+	if ($z != $lastZOutput) { $zCommand = sprintf(" Z%.3f", $z); }
+	my $fCommand ="";
+	if ($f>0) { $fCommand = sprintf("F%.3f",$f); }
+
+	my $added = ""; if ($extra) { $added = " ; added"; }
+
+	printf("G1 X%.3f Y%.3f$zCommand E%.5f $fCommand $added\n", $x, $y, $e);
+	$lastZOutput = $z;
+}
+
+sub outMoveNormal {
+	my ($x, $y, $z, $e, $f, $extra) = @_;
 
 	my $zCommand = "";
 	if ($z != $lastZOutput) { $zCommand = sprintf(" Z%.3f", $z); }
 
 	my $added = ""; if ($extra) { $added = " ; added"; }
 
-	printf("G1 X%.3f Y%.3f$zCommand E%.4f F%.3f$added\n", $x, $y, $e, surfaceSpeed($x, $y, $z));
+	printf("G1 X%.3f Y%.3f$zCommand E%.5f$added\n", $x, $y, $e);
 	$lastZOutput = $z;
 }
