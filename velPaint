@@ -12,7 +12,7 @@ use strict;
 use warnings;
 use 5.10.1;
 
-our $VERSION = 0.4;
+our $VERSION = 0.5;
 use Math::Trig;
 use Imager;
 use Getopt::Long;
